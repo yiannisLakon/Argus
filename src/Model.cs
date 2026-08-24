@@ -29,6 +29,9 @@ public sealed class ArgusConfig
     public int TickSeconds { get; set; } = 10;
     /// <summary>full | summary | off (full during alpha/beta).</summary>
     public string Telemetry { get; set; } = "full";
+    /// <summary>Directory-name prefixes excluded from every root (see <see cref="IgnoreRules"/>).
+    /// Defaults to sync-client scratch folders; set to [] to watch everything.</summary>
+    public List<string> IgnoreDirPrefixes { get; set; } = [".tmp"];
     public List<RootConfig> Roots { get; set; } = [];
 }
 

@@ -50,6 +50,16 @@ internal sealed class DirMap
         return frns;
     }
 
+    /// <summary>FRNs whose directory path is now excluded — used to converge a loaded map after the
+    /// ignore rules changed under it.</summary>
+    internal List<UInt128> CollectIgnored(IgnoreRules ignore)
+    {
+        List<UInt128> frns = [];
+        foreach ((UInt128 frn, string path) in _byFrn)
+            if (ignore.HasIgnoredDir(path, pathIsDirectory: true)) frns.Add(frn);
+        return frns;
+    }
+
     internal static bool IsUnder(string path, string prefix) =>
         path.Length > prefix.Length + 1 &&
         path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&

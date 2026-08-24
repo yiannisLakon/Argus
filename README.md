@@ -73,13 +73,23 @@ volume-wide journal records passing the kernel reason mask, so on a live disk it
 ```json
 {
   "tickSeconds": 10,
-  "telemetry": "full",            // full | summary | off
+  "telemetry": "full",                  // full | summary | off
+  "ignoreDirPrefixes": [".tmp"],        // directory-name prefixes excluded everywhere; [] watches all
   "roots": [
     { "id": "downloads", "path": "C:\\Users\\Yanis\\Downloads", "pollMinutes": 30 },
     { "id": "worddocs",  "path": "\\\\Mainsrv\\d\\Word Files",  "pollMinutes": 45 }
   ]
 }
 ```
+
+**`ignoreDirPrefixes`** excludes any path with a *directory* segment starting with one of these —
+matched per segment, case-insensitively. Excluded subtrees are never descended into, never enter
+the snapshot or the FRN map, and (because their directories are unmapped) their journal records
+can't resolve a parent and are dropped for free. A file merely *named* `.tmp-notes` is still a real
+change: the rule is about folders. Sync clients are the motivating case — Google Drive's
+`.tmp.driveupload` churned a file per upload and dominated the change log. Editing the list applies
+live and prunes already-recorded state silently — those paths left the watch by configuration, not
+by being deleted, so emitting `removed` for them would be a lie.
 
 Local paths → journal; UNC paths → poller (**always `\\server\share`, never a mapped drive** —
 services don't see user drive mappings). `pollMinutes` is the poller cadence (±10% jitter, overlap

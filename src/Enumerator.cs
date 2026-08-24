@@ -8,8 +8,10 @@ namespace Argus;
 /// two paths. Hidden and system files ARE included — a change hidden from the shell is still a
 /// change. Per-directory access errors are logged and the directory skipped, so one unreadable
 /// folder never aborts the walk; the rest of the root still diffs correctly.</summary>
-public sealed class Enumerator(string rootFullPath, ErrorLog errors)
+public sealed class Enumerator(string rootFullPath, ErrorLog errors, IgnoreRules? ignore = null)
 {
+    readonly IgnoreRules _ignore = ignore ?? IgnoreRules.None;
+
     // Include hidden/system (the default EnumerationOptions would skip them); never surface reparse
     // points. IgnoreInaccessible=false so a denied directory raises — we want it logged, not silently
     // treated as empty, which would look exactly like "everything under it was deleted".
@@ -54,7 +56,9 @@ public sealed class Enumerator(string rootFullPath, ErrorLog errors)
             {
                 if (child is DirectoryInfo sub)
                 {
-                    stack.Push(sub);
+                    // Excluded subtrees are never descended into — that is where the I/O saving is
+                    // on a big tree, not merely filtering the results afterwards.
+                    if (!_ignore.IsIgnoredDirName(sub.Name)) stack.Push(sub);
                     continue;
                 }
 

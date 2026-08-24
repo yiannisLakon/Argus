@@ -114,6 +114,7 @@ internal sealed class Worker : BackgroundService
             _telemetryMode = cfg.Telemetry;
         }
 
+        var ignore = new IgnoreRules(cfg.IgnoreDirPrefixes);
         var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (RootConfig r in cfg.Roots)
         {
@@ -124,7 +125,9 @@ internal sealed class Worker : BackgroundService
             if (!wanted.Add(r.Id))
             { _errors.Log($"config\tduplicate root id '{r.Id}' — later entry skipped"); continue; }
 
-            string key = $"{r.Path}|{r.PollMinutes}";
+            // Prefixes are part of a root's identity: editing them rebuilds the watcher, which is
+            // what re-runs PurgeIgnored against the persisted state.
+            string key = $"{r.Path}|{r.PollMinutes}|{string.Join(',', cfg.IgnoreDirPrefixes)}";
             if (_rootKeys.TryGetValue(r.Id, out string? oldKey) && oldKey == key) continue;
             // Failed construction (e.g. transiently unreadable snapshot) retries with backoff —
             // not only on the next config edit, which might never come.
@@ -134,8 +137,8 @@ internal sealed class Worker : BackgroundService
             if (_pollers.Remove(r.Id, out Poller? op)) op.Dispose();
             try
             {
-                if (r.IsUnc) _pollers[r.Id] = new Poller(r, _errors, _stats!);
-                else _watchers[r.Id] = new JournalWatcher(r, _errors, _stats!);
+                if (r.IsUnc) _pollers[r.Id] = new Poller(r, _errors, _stats!, ignore);
+                else _watchers[r.Id] = new JournalWatcher(r, _errors, _stats!, ignore);
                 _rootKeys[r.Id] = key;
                 _retryAt.Remove(r.Id);
             }

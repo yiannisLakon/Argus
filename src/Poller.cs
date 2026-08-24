@@ -14,6 +14,7 @@ internal sealed class Poller : IDisposable
     readonly ErrorLog _errors;
     readonly StatsSink _stats;
     readonly EventSink _events;
+    readonly IgnoreRules _ignore;
 
     Snapshot? _snapshot;
     volatile bool _busy;
@@ -23,14 +24,25 @@ internal sealed class Poller : IDisposable
 
     internal long Polls, Baselines, Events;
 
-    internal Poller(RootConfig root, ErrorLog errors, StatsSink stats)
+    internal Poller(RootConfig root, ErrorLog errors, StatsSink stats, IgnoreRules? ignore = null)
     {
+        _ignore = ignore ?? IgnoreRules.None;
         _root = root;
         _fullPath = Path.TrimEndingDirectorySeparator(root.Path);
         _errors = errors;
         _stats = stats;
         _events = new EventSink(root.Id);
         _snapshot = Snapshot.Load(SnapshotPath, errors);
+
+        // Converge loaded state with the rules at once (see JournalWatcher.PurgeIgnored): silent,
+        // because those paths left the watch by configuration, not by being deleted.
+        if (_ignore.Any && _snapshot is not null)
+        {
+            List<string> drop = [];
+            foreach ((string p, _) in _snapshot.Entries)
+                if (_ignore.HasIgnoredDir(p, pathIsDirectory: false)) drop.Add(p);
+            foreach (string p in drop) _snapshot.Entries.Remove(p);
+        }
     }
 
     string SnapshotPath => Path.Combine(StateDir, _root.Id + ".snapshot.jsonl");
@@ -66,7 +78,7 @@ internal sealed class Poller : IDisposable
             return;
         }
 
-        var en = new Enumerator(_fullPath, _errors);
+        var en = new Enumerator(_fullPath, _errors, _ignore);
         var curr = Snapshot.FromEntries(en.Walk());
         if (en.FailedRelDirs.Contains("."))
         {

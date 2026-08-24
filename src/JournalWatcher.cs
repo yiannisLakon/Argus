@@ -23,6 +23,7 @@ internal sealed class JournalWatcher : IDisposable
     readonly ErrorLog _errors;
     readonly StatsSink _stats;
     readonly EventSink _events;
+    readonly IgnoreRules _ignore;
 
     UsnJournal? _journal;
     CursorState? _cursor;
@@ -44,8 +45,9 @@ internal sealed class JournalWatcher : IDisposable
     // Shutdown-summary counters (read by Worker after the loop stops).
     internal long Drains, Polls, Baselines, Resyncs, Records, Events;
 
-    internal JournalWatcher(RootConfig root, ErrorLog errors, StatsSink stats)
+    internal JournalWatcher(RootConfig root, ErrorLog errors, StatsSink stats, IgnoreRules? ignore = null)
     {
+        _ignore = ignore ?? IgnoreRules.None;
         _root = root;
         _fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root.Path));
         string vol = Path.GetPathRoot(_fullPath)?.TrimEnd('\\')
@@ -59,6 +61,26 @@ internal sealed class JournalWatcher : IDisposable
         _cursor = CursorStore.Load(root.Id, errors);
         _snapshot = Snapshot.Load(SnapshotPath, errors);
         _dirMap = DirMap.Load(root.Id, errors);
+        PurgeIgnored();
+    }
+
+    /// <summary>Drop anything the ignore rules now exclude from freshly loaded state, so adding a
+    /// prefix to the config takes effect at once instead of waiting for the next resync. Nothing is
+    /// emitted: those paths left the watch by configuration, not by being deleted, and a `removed`
+    /// event would claim files vanished that are still sitting on disk.</summary>
+    void PurgeIgnored()
+    {
+        if (!_ignore.Any) return;
+        if (_snapshot is not null)
+        {
+            List<string> drop = [];
+            foreach ((string p, _) in _snapshot.Entries)
+                if (_ignore.HasIgnoredDir(p, pathIsDirectory: false)) drop.Add(p);
+            foreach (string p in drop) _snapshot.Entries.Remove(p);
+            if (drop.Count > 0) _snapDirty = true;
+        }
+        if (_dirMap is not null)
+            foreach (UInt128 frn in _dirMap.CollectIgnored(_ignore)) _dirMap.Remove(frn);
     }
 
     string SnapshotPath => Path.Combine(StateDir, _root.Id + ".snapshot.jsonl");
@@ -370,6 +392,19 @@ internal sealed class JournalWatcher : IDisposable
             return 0;
         }
 
+        if (_ignore.IsIgnoredDirName(rec.Name))
+        {
+            // Excluded subtree: never map it, so its children's records can't resolve a parent and
+            // are dropped for free. If a rename just moved a watched directory INTO exclusion (or
+            // the config changed), unmap it and its descendants — silently, per PurgeIgnored.
+            if (known)
+            {
+                foreach (UInt128 f in _dirMap.CollectSubtree(oldRel)) _dirMap.Remove(f);
+                _dirMap.Remove(rec.Frn);
+            }
+            return 0;
+        }
+
         if ((reason & ReasonFileDelete) != 0)
             return known ? RemoveSubtree(oldRel, alsoSelf: rec.Frn) : 0;
 
@@ -441,7 +476,7 @@ internal sealed class JournalWatcher : IDisposable
         _dirMap!.Set(frn, rel);
         string full = Path.Join(_fullPath, rel);
         int emitted = 0;
-        foreach (FileEntry fe in new Enumerator(full, _errors).Walk())
+        foreach (FileEntry fe in new Enumerator(full, _errors, _ignore).Walk())
         {
             string p = $"{rel}\\{fe.RelPath}";
             if (!_snapshot!.Entries.ContainsKey(p))
@@ -476,22 +511,32 @@ internal sealed class JournalWatcher : IDisposable
     /// directory; directories ≪ files, so this rides along with the scan for ~free.</summary>
     void BuildDirMapUnder(DirMap map, string fullPath)
     {
+        // Walked manually rather than with RecurseSubdirectories, so an excluded directory is not
+        // descended into at all — filtering the results afterwards would still pay the walk.
         var opts = new EnumerationOptions
         {
-            RecurseSubdirectories = true,
+            RecurseSubdirectories = false,
             IgnoreInaccessible = true,
             AttributesToSkip = FileAttributes.ReparsePoint,
             ReturnSpecialDirectories = false,
         };
-        try
+        var stack = new Stack<string>();
+        stack.Push(fullPath);
+        while (stack.Count > 0)
         {
-            foreach (string dir in Directory.EnumerateDirectories(fullPath, "*", opts))
+            string dir = stack.Pop();
+            string[] subs;
+            try { subs = Directory.GetDirectories(dir, "*", opts); }
+            catch (Exception ex) { _errors.Log($"dirmap-walk\t{_root.Id}\t{dir}", ex); continue; }
+
+            foreach (string sub in subs)
             {
-                if (TryGetFileId(dir, out UInt128 id)) map.Set(id, Path.GetRelativePath(_fullPath, dir));
-                else _errors.Log($"dirmap\t{_root.Id}\tno file id for {dir} — its events will not resolve");
+                if (_ignore.IsIgnoredDirName(Path.GetFileName(sub.AsSpan()))) continue;
+                if (TryGetFileId(sub, out UInt128 id)) map.Set(id, Path.GetRelativePath(_fullPath, sub));
+                else _errors.Log($"dirmap\t{_root.Id}\tno file id for {sub} — its events will not resolve");
+                stack.Push(sub);
             }
         }
-        catch (Exception ex) { _errors.Log($"dirmap-walk\t{_root.Id}\t{fullPath}", ex); }
     }
 
     // ------------------------------------------------- resync / degraded poll
@@ -514,7 +559,7 @@ internal sealed class JournalWatcher : IDisposable
 
         long preUsn = jd.NextUsn;   // BEFORE the scan (jd was queried before this task even started)
 
-        var en = new Enumerator(_fullPath, _errors);
+        var en = new Enumerator(_fullPath, _errors, _ignore);
         var curr = Snapshot.FromEntries(en.Walk());
         if (en.FailedRelDirs.Contains("."))
         {
@@ -596,7 +641,7 @@ internal sealed class JournalWatcher : IDisposable
             return;
         }
 
-        var en = new Enumerator(_fullPath, _errors);
+        var en = new Enumerator(_fullPath, _errors, _ignore);
         var curr = Snapshot.FromEntries(en.Walk());
         if (en.FailedRelDirs.Contains("."))
         {
