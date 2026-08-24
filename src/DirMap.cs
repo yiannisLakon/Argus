@@ -56,7 +56,7 @@ internal sealed class DirMap
     {
         List<UInt128> frns = [];
         foreach ((UInt128 frn, string path) in _byFrn)
-            if (ignore.HasIgnoredDir(path, pathIsDirectory: true)) frns.Add(frn);
+            if (ignore.IsIgnoredPath(path, pathIsDirectory: true)) frns.Add(frn);
         return frns;
     }
 

@@ -86,11 +86,13 @@ public static class Program
               // Argus — watched roots. Reread every tick; edits apply live.
               // Local paths are watched via the USN journal; UNC paths via the poller.
               // UNC roots must use \\server\share form, never a mapped drive (services don't see them).
-              // ignoreDirPrefixes: any path with a DIRECTORY segment starting with one of these is
-              // ignored entirely (sync scratch folders). [] to watch everything.
+              // ignoreDirPrefixes excludes whole subtrees by FOLDER name (sync scratch folders);
+              // ignoreFilePrefixes excludes individual FILES by name (Office lock files). Prefix
+              // match on one path segment, case-insensitive. [] disables either.
               "tickSeconds": 10,
               "telemetry": "full",
               "ignoreDirPrefixes": [".tmp"],
+              "ignoreFilePrefixes": ["~$"],
               "roots": [
                 { "id": "downloads", "path": "C:\\Users\\Yanis\\Downloads", "pollMinutes": 30 }
               ]

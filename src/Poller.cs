@@ -40,7 +40,7 @@ internal sealed class Poller : IDisposable
         {
             List<string> drop = [];
             foreach ((string p, _) in _snapshot.Entries)
-                if (_ignore.HasIgnoredDir(p, pathIsDirectory: false)) drop.Add(p);
+                if (_ignore.IsIgnoredPath(p, pathIsDirectory: false)) drop.Add(p);
             foreach (string p in drop) _snapshot.Entries.Remove(p);
         }
     }

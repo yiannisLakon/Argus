@@ -74,7 +74,8 @@ volume-wide journal records passing the kernel reason mask, so on a live disk it
 {
   "tickSeconds": 10,
   "telemetry": "full",                  // full | summary | off
-  "ignoreDirPrefixes": [".tmp"],        // directory-name prefixes excluded everywhere; [] watches all
+  "ignoreDirPrefixes": [".tmp"],        // folder-name prefixes: excludes the whole subtree
+  "ignoreFilePrefixes": ["~$"],         // file-name prefixes: excludes those files anywhere
   "roots": [
     { "id": "downloads", "path": "C:\\Users\\Yanis\\Downloads", "pollMinutes": 30 },
     { "id": "worddocs",  "path": "\\\\Mainsrv\\d\\Word Files",  "pollMinutes": 45 }
@@ -82,14 +83,22 @@ volume-wide journal records passing the kernel reason mask, so on a live disk it
 }
 ```
 
-**`ignoreDirPrefixes`** excludes any path with a *directory* segment starting with one of these —
-matched per segment, case-insensitively. Excluded subtrees are never descended into, never enter
-the snapshot or the FRN map, and (because their directories are unmapped) their journal records
-can't resolve a parent and are dropped for free. A file merely *named* `.tmp-notes` is still a real
-change: the rule is about folders. Sync clients are the motivating case — Google Drive's
-`.tmp.driveupload` churned a file per upload and dominated the change log. Editing the list applies
-live and prunes already-recorded state silently — those paths left the watch by configuration, not
-by being deleted, so emitting `removed` for them would be a lie.
+**Exclusions** come as two separate lists, both matched by prefix on a single path segment,
+case-insensitively:
+
+- **`ignoreDirPrefixes`** excludes a whole *subtree*. It is never descended into, never enters the
+  snapshot or the FRN map, and — because its directories stay unmapped — its journal records can't
+  resolve a parent and are dropped for free. Sync scratch folders are the case that motivated it:
+  Google Drive's `.tmp.driveupload` churned a file per upload and dominated the change log.
+- **`ignoreFilePrefixes`** excludes individual *files* wherever they appear. This needs its own
+  check on every record, since the parent directory is legitimately watched. Office lock files are
+  the case: `~$agreement.docx` exists only while the document is open.
+
+They are deliberately not one list, because the same string means different things: a folder named
+`.tmp` is noise, while a file named `.tmp-notes` may be real work — and `~$` in the *directory*
+list would do nothing at all for `~$agreement.docx`. Editing either list applies live and prunes
+already-recorded state silently: those paths left the watch by configuration, not by being deleted,
+so emitting `removed` for them would be a lie. Set either to `[]` to disable it.
 
 Local paths → journal; UNC paths → poller (**always `\\server\share`, never a mapped drive** —
 services don't see user drive mappings). `pollMinutes` is the poller cadence (±10% jitter, overlap

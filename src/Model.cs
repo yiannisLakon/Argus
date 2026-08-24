@@ -32,6 +32,8 @@ public sealed class ArgusConfig
     /// <summary>Directory-name prefixes excluded from every root (see <see cref="IgnoreRules"/>).
     /// Defaults to sync-client scratch folders; set to [] to watch everything.</summary>
     public List<string> IgnoreDirPrefixes { get; set; } = [".tmp"];
+    /// <summary>File-name prefixes excluded from every root — Office lock files by default.</summary>
+    public List<string> IgnoreFilePrefixes { get; set; } = ["~$"];
     public List<RootConfig> Roots { get; set; } = [];
 }
 

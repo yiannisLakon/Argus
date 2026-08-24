@@ -75,7 +75,7 @@ internal sealed class JournalWatcher : IDisposable
         {
             List<string> drop = [];
             foreach ((string p, _) in _snapshot.Entries)
-                if (_ignore.HasIgnoredDir(p, pathIsDirectory: false)) drop.Add(p);
+                if (_ignore.IsIgnoredPath(p, pathIsDirectory: false)) drop.Add(p);
             foreach (string p in drop) _snapshot.Entries.Remove(p);
             if (drop.Count > 0) _snapDirty = true;
         }
@@ -319,6 +319,7 @@ internal sealed class JournalWatcher : IDisposable
     {
         bool parentKnown = _dirMap!.TryGetPath(rec.ParentFrn, out string parentRel);
         if (rec.IsDirectory) return HandleDirectory(in rec, parentKnown, parentRel);
+        if (_ignore.IsIgnoredFileName(rec.Name)) return 0;   // excluded file, watched parent
         if (!parentKnown) return 0;             // outside the watched subtree
         string rel = parentRel.Length == 0 ? rec.Name.ToString() : $"{parentRel}\\{rec.Name}";
         return HandleFile(rel, rec.Reason);

@@ -62,6 +62,10 @@ public sealed class Enumerator(string rootFullPath, ErrorLog errors, IgnoreRules
                     continue;
                 }
 
+                // Excluded file name (Office lock files): the parent directory is legitimately
+                // watched, so nothing upstream filters these out.
+                if (_ignore.IsIgnoredFileName(child.Name)) continue;
+
                 if (TryMakeEntry((FileInfo)child, out FileEntry entry))
                     yield return entry;
             }

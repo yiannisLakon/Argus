@@ -114,7 +114,7 @@ internal sealed class Worker : BackgroundService
             _telemetryMode = cfg.Telemetry;
         }
 
-        var ignore = new IgnoreRules(cfg.IgnoreDirPrefixes);
+        var ignore = new IgnoreRules(cfg.IgnoreDirPrefixes, cfg.IgnoreFilePrefixes);
         var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (RootConfig r in cfg.Roots)
         {
@@ -127,7 +127,7 @@ internal sealed class Worker : BackgroundService
 
             // Prefixes are part of a root's identity: editing them rebuilds the watcher, which is
             // what re-runs PurgeIgnored against the persisted state.
-            string key = $"{r.Path}|{r.PollMinutes}|{string.Join(',', cfg.IgnoreDirPrefixes)}";
+            string key = $"{r.Path}|{r.PollMinutes}|{string.Join(',', cfg.IgnoreDirPrefixes)}|{string.Join(',', cfg.IgnoreFilePrefixes)}";
             if (_rootKeys.TryGetValue(r.Id, out string? oldKey) && oldKey == key) continue;
             // Failed construction (e.g. transiently unreadable snapshot) retries with backoff —
             // not only on the next config edit, which might never come.
