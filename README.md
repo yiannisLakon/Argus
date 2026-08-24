@@ -103,7 +103,7 @@ non-elevated runs degrade to polling and say so in error.log.
 Install as a service (run elevated; publishes are separate):
 
 ```
-dotnet publish -c Release -o C:\Tools\Published\Argus
+dotnet publish -c Release -o C:\Tools\Published\Services\Argus
 tools\install-service.ps1
 ```
 

@@ -3,15 +3,17 @@
 Install (or uninstall) the Argus Windows service. RUN ELEVATED — the SCM and HKLM both require it.
 
 Publish is NOT done here; publish first (framework-dependent AOT native binary):
-    dotnet publish -c Release -o C:\Tools\Published\Argus
+    dotnet publish -c Release -o C:\Tools\Published\Services\Argus
 
 Usage:
     tools\install-service.ps1                 # install (uses your GLOBAL_DATA_ROOT)
+    tools\install-service.ps1 -Relocate       # existing service: point it at $BinDir, re-pin data root
     tools\install-service.ps1 -Uninstall
 #>
 param(
-    [string]$BinDir = 'C:\Tools\Published\Argus',
+    [string]$BinDir = 'C:\Tools\Published\Services\Argus',
     [string]$DataRoot = $env:GLOBAL_DATA_ROOT,
+    [switch]$Relocate,
     [switch]$Uninstall
 )
 
@@ -39,6 +41,24 @@ $exe = Join-Path $BinDir 'argus.exe'
 if (-not (Test-Path $exe)) {
     Write-Error "argus.exe not found in $BinDir — publish first: dotnet publish -c Release -o $BinDir"
 }
+$key = "HKLM:\SYSTEM\CurrentControlSet\Services\$svc"
+
+# Moving an installed service's binary: rewrite binPath (and re-pin the data root) rather than
+# uninstall/reinstall, so the service keeps its failure actions, start type and identity. A moved
+# folder WITHOUT this leaves a service that simply fails to start.
+if ($Relocate) {
+    $was = (Get-CimInstance Win32_Service -Filter "Name='$svc'" -ErrorAction SilentlyContinue).PathName
+    if (-not $was) { Write-Error "service '$svc' is not installed — run without -Relocate to install it." }
+    sc.exe config $svc binPath= "`"$exe`"" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "sc config failed ($LASTEXITCODE)" }
+    Set-ItemProperty -Path $key -Name Environment -Value ([string[]]@("GLOBAL_DATA_ROOT=$DataRoot")) -Type MultiString
+    Write-Host "relocated in $($sw.Elapsed.TotalSeconds.ToString('0.0'))s:"
+    Write-Host "  was  $was"
+    Write-Host "  now  `"$exe`""
+    Write-Host "  data root $DataRoot (re-pinned)"
+    Write-Host "`nstart it: sc.exe start $svc   — then the old folder is safe to delete"
+    return
+}
 
 # 1. The service: LocalSystem, delayed auto-start (it watches for hours; boot contention helps no one).
 sc.exe create $svc binPath= "`"$exe`"" start= delayed-auto obj= LocalSystem DisplayName= "Argus (directory change watcher)"
@@ -50,7 +70,6 @@ sc.exe failure $svc reset= 86400 actions= restart/60000/restart/60000/restart/60
 # 2. Pin GLOBAL_DATA_ROOT where LocalSystem can actually see it: the service's own registry
 #    Environment MultiString. A machine-scope env var is NOT a substitute — services.exe reads its
 #    environment at boot, so services would only see it after a reboot.
-$key = "HKLM:\SYSTEM\CurrentControlSet\Services\$svc"
 Set-ItemProperty -Path $key -Name Environment -Value ([string[]]@("GLOBAL_DATA_ROOT=$DataRoot")) -Type MultiString
 
 Write-Host ''
