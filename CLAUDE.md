@@ -24,6 +24,16 @@ Workspace + user CLAUDE.md bind in full. This file records what is *decided* —
 - FRN→path map is built from the scan (per-subtree) and maintained from dir records —
   `FSCTL_ENUM_USN_DATA` is deliberately unused. The map + snapshot + cursor persist so a restart
   never polls.
+- **Exclusions are two lists, never one.** `ignoreDirPrefixes` matches FOLDER segments (excludes the
+  whole subtree — unmapped dirs mean their records can't resolve a parent, so it costs nothing at
+  drain time); `ignoreFilePrefixes` matches FILE names (needs its own check, since the parent dir
+  is watched). Merging them makes `~$` silently useless against `~$agreement.docx`. Editing either
+  prunes persisted state **silently**: those paths left by configuration, not deletion, so a
+  `removed` event would be a lie.
+- Telemetry: **`records` is not a quietness signal.** It counts volume-wide journal records that
+  passed the kernel reason mask — never zero on a live disk (measured 2026-08-24: 0 of 87,672
+  drains). Summary mode filters on `events == 0` plus an hourly per-root heartbeat; do not
+  reintroduce a records-based test, it drops nothing.
 - Win32 layer (`UsnInterop.cs`): every struct/FSCTL/flag was verified against Windows SDK
   10.0.26100.0 headers. Never edit those from memory; re-verify (microsoft-learn MCP is registered
   in this project, or grep the SDK headers).
@@ -32,9 +42,13 @@ Workspace + user CLAUDE.md bind in full. This file records what is *decided* —
 
 - `GLOBAL_DATA_ROOT` per the user conventions: no fallback, services get it via the registry
   `Environment` pin (see `tools/install-service.ps1`).
-- Journal reads need elevation. Claude never runs elevated steps — write scripts into `tools/` and
-  hand them to Yanis (`tools/test-journal-elevated.ps1` is the end-to-end journal test; it uses a
-  throwaway VHD volume, never C:'s journal).
+- Journal reads need elevation. Elevated work belongs in `tools/` as a reviewable script, never as
+  ad-hoc commands — Yanis runs it, or Claude may when he has deliberately started an elevated
+  session and asked. `tools/test-journal-elevated.ps1` is the end-to-end journal test (throwaway
+  VHD volume, never C:'s journal); `tools/install-service.ps1` installs, `-Relocate`s or removes
+  the service.
+- Publishing: services go to `C:\Tools\Published\Services\{Name}` (see the user-level CLAUDE.md).
+  A moved folder without `sc.exe config <svc> binPath= ...` leaves a service that won't start.
 - Console mode is the dev loop: scratch `GLOBAL_DATA_ROOT`, `tickSeconds: 2`, non-elevated runs
   degrade to polling by design (error.log says so).
 - Unit tests: `dotnet test tests\Argus.Tests.csproj` (InternalsVisibleTo Argus.Tests; a
