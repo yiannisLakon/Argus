@@ -62,6 +62,12 @@ Renames are `removed` + `added` (v1). A stats line carries elapsed, records read
 events, CPU/alloc/GC/IO deltas, and — on resync/baseline lines — **`trigger` (#1–#5)**: the alpha
 metric that proves (or disproves) "the poller never runs" and why.
 
+**Telemetry volume.** `full` writes one line per root per tick (~253 B). At `tickSeconds: 10` with
+two roots that is ~3.6 MB/day, ~110 MB/month — fine for an alpha, expensive to leave on forever.
+`summary` keeps only lines carrying information (any events, and every poll/baseline/resync) plus
+one heartbeat per root per hour: ~12 KB/day. Note `records` is NOT a quietness signal — it counts
+volume-wide journal records passing the kernel reason mask, so on a live disk it is never zero.
+
 ## Config
 
 ```json
@@ -119,6 +125,13 @@ Gate #3 is the only "normal" failure and is purely sizing. After a week of telem
 journal to ~30× daily churn (records ≈ 100 bytes; a few hundred MB makes ring regression
 effectively impossible): `fsutil usn createjournal m=<bytes> C:` (resizes in place, non-disruptive).
 NTFS rounds small requests up — a `m=65536` request measured out at ~2.25 MB retained.
+
+Measure the raw churn rate before sizing — sample `Next Usn` (a USN *is* a byte offset in `$J`)
+twice a minute apart and scale. Measured on the dev PC 2026-08-24: **66 MB/day**, so the 32 MB
+default held only 11.6 h; resized to 512 MB ≈ 7.7 days. The resize preserved the journal ID, so no
+resync fired. Retention is consumed only while the machine is *running* — downtime costs nothing,
+so what must fit in the ring is the longest expected **Argus outage on a live machine**, not the
+longest power-off.
 
 ## Known v1 limits
 

@@ -28,6 +28,9 @@ public sealed class StatsSink : IDisposable
     readonly Level _level;
     readonly ArrayBufferWriter<byte> _buf = new(512);
     readonly Utf8JsonWriter _json;
+    // Last line kept per root, so summary mode can still emit a periodic heartbeat. Under _gate.
+    readonly Dictionary<string, DateTimeOffset> _lastKept = new(StringComparer.OrdinalIgnoreCase);
+    static readonly TimeSpan HeartbeatEvery = TimeSpan.FromHours(1);
     FileStream? _file;
     string _month = "";   // yyyy-MM of the currently open file
     bool _disposed;
@@ -59,15 +62,24 @@ public sealed class StatsSink : IDisposable
         int trigger, in TelemetrySample before, in TelemetrySample after)
     {
         if (_level == Level.Off) return;
-        // Summary mode drops ONLY the quiet drains — the overwhelming majority of lines in a healthy
-        // run, where the journal had nothing to report. Everything else (any events, any records,
-        // and every poll/baseline/resync) is kept, so the interesting history stays complete.
-        if (_level == Level.Summary && events == 0 && records == 0 && kind == "drain") return;
 
         DateTimeOffset ts = Now;
         lock (_gate)
         {
             if (_disposed) return;
+
+            // Summary mode keeps every line that carries information — any events at all, and every
+            // poll/baseline/resync — and drops the event-less drains, which on a live volume is
+            // nearly all of them. It deliberately does NOT test `records`: that counts volume-wide
+            // journal records passing the kernel reason mask, NOT records belonging to this root, so
+            // on any busy machine it is never zero (measured on C: 2026-08-24: 0 of 87,672 drains
+            // had records == 0 — the earlier records-based filter dropped nothing whatsoever, and
+            // summary mode cost exactly as much as full). One heartbeat per root per hour still
+            // lands, so CPU/memory/handle trends stay visible through quiet stretches.
+            if (_level == Level.Summary && kind == "drain" && events == 0 &&
+                _lastKept.TryGetValue(root, out DateTimeOffset last) && ts - last < HeartbeatEvery)
+                return;
+            _lastKept[root] = ts;
             _buf.Clear();
             _json.Reset();
 
